@@ -6,10 +6,10 @@ on:
 jobs:
   build-windows:
     runs-on: ubuntu-latest
-    
+
     env:
       OPENSSL_VER: "3.1.4"
-      
+  
     steps:
       - name: Checkout GSocket Source
         uses: actions/checkout@v4
@@ -28,53 +28,56 @@ jobs:
           wget -q https://www.openssl.org/source/openssl-${{ env.OPENSSL_VER }}.tar.gz
           tar -xzf openssl-${{ env.OPENSSL_VER }}.tar.gz
           mv openssl-${{ env.OPENSSL_VER }} openssl-build
-          
+      
           cd openssl-build
-          
+      
           ./Configure mingw64 no-shared no-dso \
             --cross-compile-prefix=x86_64-w64-mingw32- \
             --prefix=$GITHUB_WORKSPACE/openssl-dist \
             --libdir=lib
-          
+      
           echo "Compiling OpenSSL..."
           make -j$(nproc)
           make install_sw
-          
+      
           echo "OpenSSL installed to: $GITHUB_WORKSPACE/openssl-dist"
+          echo "Verifying OpenSSL libraries exist:"
+          ls -la $GITHUB_WORKSPACE/openssl-dist/lib/
 
       - name: Compile GSocket (Windows Static Exe)
         run: |
           cd gsocket-src
           ./bootstrap
-          
+      
           SSL_ROOT="$GITHUB_WORKSPACE/openssl-dist"
-          
+      
           # ===== 关键修复 =====
-          # 阶段1: configure 时只设置最小化参数，让编译器测试通过
+          # configure 需要完整的编译和链接标志才能通过 libcrypto 检测
+          # 静态链接 OpenSSL 时，必须同时提供其依赖的 Windows 系统库
+          
           export CPPFLAGS="-I$SSL_ROOT/include"
-          
-          echo "Configuring GSocket (minimal flags for compiler test)..."
+          export CFLAGS="-O2"
+          export LDFLAGS="-L$SSL_ROOT/lib -static"
+          # 关键：静态 OpenSSL 依赖这些 Windows 库，顺序很重要！
+          export LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32"
+      
+          echo "Configuring GSocket with full static linking flags..."
           ./configure --host=x86_64-w64-mingw32
-          
-          # 阶段2: make 时通过命令行参数传入完整的静态链接标志
-          echo "Building with full static linking flags..."
-          make CFLAGS="-I$SSL_ROOT/include -static -O2" \
-               LDFLAGS="-L$SSL_ROOT/lib -static" \
-               LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32"
-          
+      
+          echo "Building..."
+          make -j$(nproc)
+      
           echo "Build complete. Checking output:"
-          ls -lh tools/gs-netcat.exe
-          file tools/gs-netcat.exe
+          ls -lh tools/gs-netcat.exe || ls -lh tools/
+          file tools/gs-netcat.exe || true
           x86_64-w64-mingw32-objdump -p tools/gs-netcat.exe | grep "DLL Name" || echo "No external DLLs (fully static)"
 
       - name: Prepare Artifact
         run: |
           mkdir build-output
-          cp gsocket-src/tools/gs-netcat.exe build-output/ 2>/dev/null || true
-          cp gsocket-src/tools/gs-sftp.exe build-output/ 2>/dev/null || true
-          
           # 列出所有生成的 exe
           find gsocket-src -name "*.exe" -exec cp {} build-output/ \;
+          ls -la build-output/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
