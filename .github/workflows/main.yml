@@ -40,9 +40,8 @@ jobs:
           make -j$(nproc)
           make install_sw
       
-          echo "OpenSSL installed to: $GITHUB_WORKSPACE/openssl-dist"
-          echo "Verifying OpenSSL libraries exist:"
-          ls -la $GITHUB_WORKSPACE/openssl-dist/lib/
+          echo "OpenSSL installed. Verifying:"
+          ls -la $GITHUB_WORKSPACE/openssl-dist/lib/*.a
 
       - name: Compile GSocket (Windows Static Exe)
         run: |
@@ -51,31 +50,29 @@ jobs:
       
           SSL_ROOT="$GITHUB_WORKSPACE/openssl-dist"
       
-          # ===== 关键修复 =====
-          # configure 需要完整的编译和链接标志才能通过 libcrypto 检测
-          # 静态链接 OpenSSL 时，必须同时提供其依赖的 Windows 系统库
+          # ===== 核心修复 =====
+          # configure 时必须提供完整的链接标志，否则 libcrypto 检测会失败
+          # 静态 OpenSSL 依赖 Windows 系统库：ws2_32, gdi32, crypt32
           
-          export CPPFLAGS="-I$SSL_ROOT/include"
-          export CFLAGS="-O2"
-          export LDFLAGS="-L$SSL_ROOT/lib -static"
-          # 关键：静态 OpenSSL 依赖这些 Windows 库，顺序很重要！
-          export LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32"
-      
-          echo "Configuring GSocket with full static linking flags..."
-          ./configure --host=x86_64-w64-mingw32
+          echo "Configuring GSocket with full linking flags..."
+          ./configure \
+            --host=x86_64-w64-mingw32 \
+            CPPFLAGS="-I$SSL_ROOT/include" \
+            CFLAGS="-O2" \
+            LDFLAGS="-L$SSL_ROOT/lib -static" \
+            LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32"
       
           echo "Building..."
           make -j$(nproc)
       
           echo "Build complete. Checking output:"
-          ls -lh tools/gs-netcat.exe || ls -lh tools/
-          file tools/gs-netcat.exe || true
-          x86_64-w64-mingw32-objdump -p tools/gs-netcat.exe | grep "DLL Name" || echo "No external DLLs (fully static)"
+          ls -lh tools/*.exe
+          file tools/gs-netcat.exe
+          x86_64-w64-mingw32-objdump -p tools/gs-netcat.exe | grep "DLL Name" || echo "Fully static - no DLL dependencies"
 
       - name: Prepare Artifact
         run: |
           mkdir build-output
-          # 列出所有生成的 exe
           find gsocket-src -name "*.exe" -exec cp {} build-output/ \;
           ls -la build-output/
 
