@@ -1,0 +1,83 @@
+name: Build GSocket for Windows
+
+on:
+  workflow_dispatch: # 允许手动点击按钮触发
+
+jobs:
+  build-windows:
+    runs-on: ubuntu-latest
+    
+    env:
+      OPENSSL_VER: "3.1.4" # 指定 OpenSSL 版本
+      
+    steps:
+      - name: Checkout GSocket Source
+        uses: actions/checkout@v4
+        with:
+          repository: hackerschoice/gsocket
+          path: gsocket-src
+
+      - name: Install MinGW and Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 autoconf automake libtool make pkg-config wget tar
+
+      - name: Download and Compile Static OpenSSL (for Windows)
+        id: build-openssl
+        run: |
+          echo "Downloading OpenSSL..."
+          wget https://www.openssl.org/source/openssl-${{ env.OPENSSL_VER }}.tar.gz
+          tar -xzf openssl-${{ env.OPENSSL_VER }}.tar.gz
+          mv openssl-${{ env.OPENSSL_VER }} openssl-build
+          
+          cd openssl-build
+          
+          # 配置 OpenSSL 为 MinGW 64位 静态编译
+          # no-shared: 静态库
+          # no-dso: 不使用动态加载
+          ./Configure mingw64 no-shared no-dso \
+            --cross-compile-prefix=x86_64-w64-mingw32- \
+            --prefix=$GITHUB_WORKSPACE/openssl-dist
+          
+          echo "Compiling OpenSSL (This may take a few minutes)..."
+          make -j$(nproc)
+          make install_sw
+          
+          echo "OpenSSL build complete."
+
+      - name: Compile GSocket (Windows Static Exe)
+        run: |
+          cd gsocket-src
+          
+          # 生成配置脚本
+          ./bootstrap
+          
+          # 设置编译器标志，强制链接我们刚才编译的 OpenSSL
+          # -static: 强制静态链接所有库
+          export CFLAGS="-I$GITHUB_WORKSPACE/openssl-dist/include -static"
+          export LDFLAGS="-L$GITHUB_WORKSPACE/openssl-dist/lib -static -all-static"
+          export LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32"
+          
+          # 配置交叉编译
+          ./configure --host=x86_64-w64-mingw32 \
+            --with-openssl=$GITHUB_WORKSPACE/openssl-dist
+          
+          # 开始编译
+          make
+          
+          # 验证生成的文件
+          ls -lh tools/gs-netcat.exe
+          file tools/gs-netcat.exe
+
+      - name: Rename and Prepare Artifact
+        run: |
+          mkdir build-output
+          cp gsocket-src/tools/gs-netcat.exe build-output/gs-netcat.exe
+          cp gsocket-src/tools/gs-sftp.exe build-output/gs-sftp.exe
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsocket-windows-exe
+          path: build-output/
+          retention-days: 5
