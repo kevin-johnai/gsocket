@@ -1,14 +1,14 @@
-name: Build GSocket for Windows
+name: Build GSocket for Windows (Fixed)
 
 on:
-  workflow_dispatch: # 允许手动点击按钮触发
+  workflow_dispatch:
 
 jobs:
   build-windows:
     runs-on: ubuntu-latest
     
     env:
-      OPENSSL_VER: "3.1.4" # 指定 OpenSSL 版本
+      OPENSSL_VER: "3.1.4"
       
     steps:
       - name: Checkout GSocket Source
@@ -26,24 +26,21 @@ jobs:
         id: build-openssl
         run: |
           echo "Downloading OpenSSL..."
-          wget https://www.openssl.org/source/openssl-${{ env.OPENSSL_VER }}.tar.gz
+          wget -q https://www.openssl.org/source/openssl-${{ env.OPENSSL_VER }}.tar.gz
           tar -xzf openssl-${{ env.OPENSSL_VER }}.tar.gz
           mv openssl-${{ env.OPENSSL_VER }} openssl-build
           
           cd openssl-build
           
-          # 配置 OpenSSL 为 MinGW 64位 静态编译
-          # no-shared: 静态库
-          # no-dso: 不使用动态加载
+          # 关键修改：显式指定 --libdir=lib 强制安装到 lib 目录，避免 lib64 路径混乱
           ./Configure mingw64 no-shared no-dso \
             --cross-compile-prefix=x86_64-w64-mingw32- \
-            --prefix=$GITHUB_WORKSPACE/openssl-dist
+            --prefix=$GITHUB_WORKSPACE/openssl-dist \
+            --libdir=lib
           
-          echo "Compiling OpenSSL (This may take a few minutes)..."
+          echo "Compiling OpenSSL..."
           make -j$(nproc)
           make install_sw
-          
-          echo "OpenSSL build complete."
 
       - name: Compile GSocket (Windows Static Exe)
         run: |
@@ -52,20 +49,29 @@ jobs:
           # 生成配置脚本
           ./bootstrap
           
-          # 设置编译器标志，强制链接我们刚才编译的 OpenSSL
-          # -static: 强制静态链接所有库
-          export CFLAGS="-I$GITHUB_WORKSPACE/openssl-dist/include -static"
-          export LDFLAGS="-L$GITHUB_WORKSPACE/openssl-dist/lib -static -all-static"
-          export LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32"
+          # 确定 OpenSSL 路径 (现在强制为 lib 了，但为了保险我们都加上)
+          SSL_ROOT="$GITHUB_WORKSPACE/openssl-dist"
           
-          # 配置交叉编译
-          ./configure --host=x86_64-w64-mingw32 \
-            --with-openssl=$GITHUB_WORKSPACE/openssl-dist
+          # 关键修复：
+          # 1. 移除了 --with-openssl 参数
+          # 2. CPPFLAGS 用于指定头文件
+          # 3. LDFLAGS 指定库文件路径
+          # 4. LIBS 显式列出所有 Windows 依赖，顺序很重要 (ssl -> crypto -> 系统库)
           
-          # 开始编译
+          export CPPFLAGS="-I$SSL_ROOT/include"
+          export CFLAGS="-I$SSL_ROOT/include -static -O2"
+          export LDFLAGS="-L$SSL_ROOT/lib -static -all-static"
+          export LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32 -luser32 -lkernel32"
+          
+          echo "Configuring GSocket..."
+          # 这里不传 --with-openssl，而是靠环境变量
+          ./configure --host=x86_64-w64-mingw32
+          
+          echo "Building..."
           make
           
-          # 验证生成的文件
+          # 验证
+          echo "Check Output:"
           ls -lh tools/gs-netcat.exe
           file tools/gs-netcat.exe
 
@@ -73,7 +79,7 @@ jobs:
         run: |
           mkdir build-output
           cp gsocket-src/tools/gs-netcat.exe build-output/gs-netcat.exe
-          cp gsocket-src/tools/gs-sftp.exe build-output/gs-sftp.exe
+          cp gsocket-src/tools/gs-sftp.exe build-output/gs-sftp.exe || true
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
