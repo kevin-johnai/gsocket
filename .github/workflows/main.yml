@@ -1,78 +1,65 @@
-name: Build GSocket for Windows (Final Fix)
+name: Build GSocket with Cygwin
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-windows:
-    runs-on: ubuntu-latest
+  build-cygwin:
+    runs-on: windows-latest
 
-    env:
-      OPENSSL_VER: "3.1.4"
-  
     steps:
-      - name: Checkout GSocket Source
-        uses: actions/checkout@v4
+      - name: Install Cygwin
+        uses: cygwin/cygwin-install-action@v4
         with:
-          repository: hackerschoice/gsocket
-          path: gsocket-src
+          packages: >-
+            gcc-core
+            make
+            automake
+            autoconf
+            libtool
+            libssl-devel
+            libssl3
+            git
+            curl
+            wget
 
-      - name: Install MinGW and Build Tools
+      - name: Clone and Build GSocket
+        shell: C:\cygwin\bin\bash.exe --login -eo pipefail '{0}'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64 autoconf automake libtool make pkg-config wget tar
-
-      - name: Download and Compile Static OpenSSL (for Windows)
-        run: |
-          wget -q https://www.openssl.org/source/openssl-${{ env.OPENSSL_VER }}.tar.gz
-          tar -xzf openssl-${{ env.OPENSSL_VER }}.tar.gz
-          mv openssl-${{ env.OPENSSL_VER }} openssl-build
-      
-          cd openssl-build
-          ./Configure mingw64 no-shared no-dso \
-            --cross-compile-prefix=x86_64-w64-mingw32- \
-            --prefix=$GITHUB_WORKSPACE/openssl-dist \
-            --libdir=lib
-      
-          make -j$(nproc)
-          make install_sw
+          cd /cygdrive/d/a
           
-          echo "Verifying OpenSSL:"
-          ls -la $GITHUB_WORKSPACE/openssl-dist/lib/*.a
-
-      - name: Compile GSocket (Windows Static Exe)
-        run: |
-          cd gsocket-src
+          # Clone source
+          git clone https://github.com/hackerschoice/gsocket.git
+          cd gsocket
+          
+          # Build
           ./bootstrap
-      
-          SSL_ROOT="$GITHUB_WORKSPACE/openssl-dist"
-          
-          echo "Configuring with cache variables to bypass library detection..."
-          ./configure \
-            --host=x86_64-w64-mingw32 \
-            CPPFLAGS="-I$SSL_ROOT/include" \
-            CFLAGS="-O2" \
-            LDFLAGS="-L$SSL_ROOT/lib -static" \
-            LIBS="-lssl -lcrypto -lws2_32 -lgdi32 -lcrypt32" \
-            ac_cv_lib_crypto_ENGINE_init=yes \
-            ac_cv_lib_ssl_SSL_new=yes
-      
-          echo "Building..."
+          ./configure
           make -j$(nproc)
-      
-          echo "Checking output:"
-          ls -lh tools/*.exe || find . -name "*.exe"
-          file tools/gs-netcat.exe || true
+          
+          # Check result
+          ls -lh tools/gs-netcat.exe
+          file tools/gs-netcat.exe
 
-      - name: Prepare Artifact
+      - name: Copy Cygwin DLLs (Required for running)
+        shell: C:\cygwin\bin\bash.exe --login -eo pipefail '{0}'
         run: |
-          mkdir build-output
-          find gsocket-src -name "*.exe" -exec cp {} build-output/ \;
-          ls -la build-output/
+          cd /cygdrive/d/a/gsocket
+          mkdir -p dist
+          
+          # Copy executable
+          cp tools/gs-netcat.exe dist/
+          
+          # Copy required Cygwin DLLs
+          cp /usr/bin/cygwin1.dll dist/
+          cp /usr/bin/cygssl-3.dll dist/ || cp /usr/bin/cygssl-*.dll dist/
+          cp /usr/bin/cygcrypto-3.dll dist/ || cp /usr/bin/cygcrypto-*.dll dist/
+          cp /usr/bin/cygz.dll dist/ || true
+          
+          ls -la dist/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gsocket-windows-exe
-          path: build-output/
-          retention-days: 5
+          name: gs-netcat-cygwin
+          path: D:\a\gsocket\dist\*
