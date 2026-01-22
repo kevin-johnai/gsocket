@@ -30,7 +30,7 @@ jobs:
           git clone https://github.com/hackerschoice/gsocket.git gsocket-build
           cd gsocket-build
           ./bootstrap
-          ./configure
+          ./configure LDFLAGS="-mwindows"
           make -j$(nproc)
           ls -lh tools/gs-netcat.exe
           
