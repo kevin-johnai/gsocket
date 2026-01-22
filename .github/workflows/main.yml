@@ -21,22 +21,20 @@ jobs:
             git
             wget
 
-      - name: Build GSocket in Cygwin
+      - name: Build and Collect Artifacts
+        working-directory: D:\a
         shell: C:\cygwin\bin\bash.exe --login --norc -eo pipefail -o igncr {0}
         run: |
           cd /cygdrive/d/a
-          rm -rf gsocket
-          git clone https://github.com/hackerschoice/gsocket.git
-          cd gsocket
+          rm -rf gsocket-build
+          git clone https://github.com/hackerschoice/gsocket.git gsocket-build
+          cd gsocket-build
           ./bootstrap
           ./configure
           make -j$(nproc)
           ls -lh tools/gs-netcat.exe
-
-      - name: Collect Artifacts
-        shell: C:\cygwin\bin\bash.exe --login --norc -eo pipefail -o igncr {0}
-        run: |
-          cd /cygdrive/d/a/gsocket
+          
+          # Collect artifacts
           mkdir -p dist
           cp tools/gs-netcat.exe dist/
           cp tools/gs-mount.exe dist/ || true
@@ -52,4 +50,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gs-netcat-cygwin
-          path: D:\a\gsocket\dist\*
+          path: D:\a\gsocket-build\dist\*
