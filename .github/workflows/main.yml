@@ -7,6 +7,10 @@ jobs:
   build-cygwin:
     runs-on: windows-latest
 
+    defaults:
+      run:
+        shell: bash
+
     steps:
       - name: Install Cygwin
         uses: cygwin/cygwin-install-action@v4
@@ -18,44 +22,33 @@ jobs:
             autoconf
             libtool
             libssl-devel
-            libssl3
             git
-            curl
             wget
 
-      - name: Clone and Build GSocket
-        shell: C:\cygwin\bin\bash.exe --login -eo pipefail '{0}'
+      - name: Build GSocket in Cygwin
+        shell: C:\cygwin\bin\bash.exe --login --norc -eo pipefail -o igncr {0}
         run: |
           cd /cygdrive/d/a
-          
-          # Clone source
           git clone https://github.com/hackerschoice/gsocket.git
           cd gsocket
-          
-          # Build
           ./bootstrap
           ./configure
           make -j$(nproc)
-          
-          # Check result
           ls -lh tools/gs-netcat.exe
-          file tools/gs-netcat.exe
 
-      - name: Copy Cygwin DLLs (Required for running)
-        shell: C:\cygwin\bin\bash.exe --login -eo pipefail '{0}'
+      - name: Collect Artifacts
+        shell: C:\cygwin\bin\bash.exe --login --norc -eo pipefail -o igncr {0}
         run: |
           cd /cygdrive/d/a/gsocket
           mkdir -p dist
-          
-          # Copy executable
           cp tools/gs-netcat.exe dist/
-          
-          # Copy required Cygwin DLLs
+          cp tools/gs-mount.exe dist/ || true
+          cp tools/gs-sftp.exe dist/ || true
+          cp tools/blitz.exe dist/ || true
           cp /usr/bin/cygwin1.dll dist/
-          cp /usr/bin/cygssl-3.dll dist/ || cp /usr/bin/cygssl-*.dll dist/
-          cp /usr/bin/cygcrypto-3.dll dist/ || cp /usr/bin/cygcrypto-*.dll dist/
+          cp /usr/bin/cygssl-*.dll dist/
+          cp /usr/bin/cygcrypto-*.dll dist/
           cp /usr/bin/cygz.dll dist/ || true
-          
           ls -la dist/
 
       - name: Upload Artifacts
